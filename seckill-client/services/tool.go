@@ -63,51 +63,56 @@ func InRedisMq(u *itemcenter.User) error {
 	return nil
 }
 
+var n int64 = 0
+
 func TokenBucket(num int64, c *gin.Context) {
-	var n int64 = 0
-	for n < num {
-		messages, err := RDB0.XReadGroup(ctx, &redis.XReadGroupArgs{
-			Group:    group,
-			Consumer: consumer,
-			Streams:  []string{stream, start},
-			Count:    int64(count),
-			Block:    0,
-			NoAck:    false,
-		}).Result()
-		if err != nil {
-			fmt.Println("redisMq read error : ", err)
-			return
-		}
-		limiter := rate.NewLimiter(rate.Limit(50), 100)
-		for _, message := range messages {
-			values := message.Messages
-			for _, Value := range values {
-				value := Value.Values
-				if err = limiter.WaitN(ctx, 50); err != nil {
-					fmt.Println("limiter error : ", err)
-					return
-				}
-				var user itemcenter.User
-				if username, ok := value["username"].(string); ok {
-					user.Username = username
-				}
-				if password, ok := value["password"].(string); ok {
-					user.Password = password
-				}
-				//if id, ok := value["id"].(int64); ok {
-				//	user.Id = id
-				//}
-				skToken, err := rpc.ItemCenter.CreateToken(ctx, &user, model.SKToken)
-				if err != nil {
-					resps.InternalErr(c)
-					c.Abort()
-					return
-				}
-				if err := RDB1.Set(ctx, user.Username, skToken, time.Hour*24*7).Err(); err == nil {
-					return
-				}
+	if n == num {
+		return
+	}
+	//for n < num {
+	messages, err := RDB0.XReadGroup(ctx, &redis.XReadGroupArgs{
+		Group:    group,
+		Consumer: consumer,
+		Streams:  []string{stream, start},
+		Count:    int64(count),
+		Block:    0,
+		NoAck:    false,
+	}).Result()
+	if err != nil {
+		fmt.Println("redisMq read error : ", err)
+		return
+	}
+	limiter := rate.NewLimiter(rate.Limit(50), 100)
+	for _, message := range messages {
+		values := message.Messages
+		for _, Value := range values {
+			value := Value.Values
+			if err = limiter.WaitN(ctx, 50); err != nil {
+				fmt.Println("limiter error : ", err)
+				return
+			}
+			var user itemcenter.User
+			if username, ok := value["username"].(string); ok {
+				user.Username = username
+			}
+			if password, ok := value["password"].(string); ok {
+				user.Password = password
+			}
+			//if id, ok := value["id"].(int64); ok {
+			//	user.Id = id
+			//}
+			skToken, err := rpc.ItemCenter.CreateToken(ctx, &user, model.SKToken)
+			if err != nil {
+				resps.InternalErr(c)
+				c.Abort()
+				return
+			}
+			if err := RDB1.Set(ctx, user.Username, skToken, time.Hour*24*7).Err(); err == nil {
+				c.Next()
 			}
 		}
-		n++
 	}
+	n++
+
+	//}
 }
