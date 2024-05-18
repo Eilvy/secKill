@@ -63,7 +63,10 @@ func InRedisMq(u *itemcenter.User) error {
 	return nil
 }
 
-var n int64 = 0
+var (
+	n       int64 = 0
+	limiter       = rate.NewLimiter(rate.Limit(50), 100)
+)
 
 func TokenBucket(num int64, c *gin.Context) {
 	if n == num {
@@ -82,7 +85,7 @@ func TokenBucket(num int64, c *gin.Context) {
 		fmt.Println("redisMq read error : ", err)
 		return
 	}
-	limiter := rate.NewLimiter(rate.Limit(50), 100)
+
 	for _, message := range messages {
 		values := message.Messages
 		for _, Value := range values {
@@ -107,12 +110,15 @@ func TokenBucket(num int64, c *gin.Context) {
 				c.Abort()
 				return
 			}
-			if err := RDB1.Set(ctx, user.Username, skToken, time.Hour*24*7).Err(); err == nil {
+			if err = RDB1.Set(ctx, user.Username, skToken, time.Hour*24*7).Err(); err == nil {
+				if err = RDB0.XAck(ctx, stream, group, Value.ID).Err(); err != nil {
+					fmt.Println("ack error : ", err)
+					return
+				}
 				c.Next()
 			}
 		}
 	}
 	n++
-
 	//}
 }
